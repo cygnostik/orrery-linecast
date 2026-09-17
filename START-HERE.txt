@@ -16,10 +16,12 @@ No pip install, API key or internet connection is needed to run Orrery.
 
 Space = pause/play       Tab or 1–9 = select planet
 v = orbital/sky view     l = observer coordinates
+b = loop date interval   g = optional IP location (asks first)
 ? = all controls         q = quit
 
-Sky mode needs latitude,longitude. Press l to enter them; these stay in
-memory for this run only. A larger terminal shows the planet portrait and
+Sky mode needs latitude,longitude. Press l to enter them, or g to consent
+to an approximate public-IP lookup. Coordinates stay in memory for this
+run only. The optional lookup requires internet access. A larger terminal shows the planet portrait and
 readout. Try 120 columns by 40 rows.
 
 See README.md for controls, command examples and troubleshooting.
