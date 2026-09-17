@@ -18,7 +18,7 @@ def usable_python(candidate):
     try:
         result = subprocess.run(
             [str(candidate), '-B', '-c',
-             'import sys; assert sys.version_info >= (3,10); import linecast'],
+             'import sys; assert sys.version_info >= (3,10); import linecast; assert linecast.__version__ == "2.6.1"'],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
             cwd=str(Path.home()))
         return result.returncode == 0

@@ -62,9 +62,14 @@ class State:
     zoom: float = 1.0
     rotation: float = -18.0
     note: str = ''
+    loop: bool = False
+    location_inferred: bool = False
+    theme: str = 'orrery'
 
     def __post_init__(self):
         self.moment = validate_date(self.moment)
+        if self.theme not in ('orrery', 'native'):
+            raise ValueError("theme must be 'orrery' or 'native'")
 
     @property
     def speed(self):
@@ -109,11 +114,13 @@ class OrreryApp(LiveApp):
     def __init__(self, state=None, width=None, height=None):
         self.state = state or State()
         self.width, self.height = width, height
+        self.interval = 1 / 20 if self.state.view == 'orbit' else 0.10
         self.hits = []
         self.help_open = False
         self.location_edit = False
         self.location_text = ''
         self.location_error = ''
+        self.location_confirm = False
         self.camera = None
         self._last_tick = time.monotonic()
         self._drag_rotation = None
@@ -123,17 +130,53 @@ class OrreryApp(LiveApp):
         return self.width or cols, self.height or rows
 
     def advance(self, seconds):
-        if not self.state.playing or self.help_open or self.location_edit:
+        if not self.state.playing or self.help_open or self.location_edit or self.location_confirm:
             return
-        days = max(0, seconds) * self.state.speed * self.state.direction
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            return
+        if math.isnan(seconds):
+            self.state.note = 'Ignored a non-finite clock advance.'
+            return
+        if math.isinf(seconds):
+            days = (math.inf if seconds > 0 else 0.0) * self.state.speed * self.state.direction
+        else:
+            days = max(0.0, seconds) * self.state.speed * self.state.direction
         self.shift_days(days, pause=False)
 
     def shift_days(self, days, pause=True):
         s = self.state
         try:
+            days = float(days)
+        except (TypeError, ValueError):
+            return False
+        if math.isnan(days):
+            s.note = 'Ignored a non-finite date advance.'
+            return False
+        if s.loop and math.isfinite(days):
+            span = (MAX_DATE - MIN_DATE).total_seconds() / 86400.0
+            offset = (s.moment - MIN_DATE).total_seconds() / 86400.0
+            target = offset + math.fmod(days, span)
+            if 0.0 <= target <= span:
+                s.moment = MIN_DATE + timedelta(days=target)
+            else:
+                s.moment = MIN_DATE + timedelta(days=target % span)
+            if pause:
+                s.playing = False
+            return True
+        if math.isinf(days):
+            s.moment = MAX_DATE if days > 0 else MIN_DATE
+            s.playing = False
+            s.note = 'Model date limit reached; reverse or reset with n.'
+            return False
+        try:
             new = s.moment + timedelta(days=days)
         except OverflowError:
-            new = MAX_DATE if days > 0 else MIN_DATE
+            s.moment = MAX_DATE if days > 0 else MIN_DATE
+            s.playing = False
+            s.note = 'Model date limit reached; reverse or reset with n.'
+            return False
         if new > MAX_DATE or new < MIN_DATE:
             s.moment = max(MIN_DATE, min(MAX_DATE, new))
             s.playing = False
@@ -142,6 +185,7 @@ class OrreryApp(LiveApp):
             s.moment = new
         if pause:
             s.playing = False
+        return True
 
     def sky_camera(self):
         if self.camera is None and self.state.location is not None:
@@ -154,23 +198,42 @@ class OrreryApp(LiveApp):
 
     def render_static(self):
         from render import render_frame
+        started = time.monotonic()
         cols, rows = self.dimensions()
         result, self.hits = render_frame(self.state, cols, rows, self.sky_camera() if self.state.view == 'sky' else None,
                                         help_open=self.help_open,
+                                        location_confirm=self.location_confirm,
                                         location_text=self.location_text if self.location_edit else None,
                                         location_error=self.location_error)
+        if self.state.view == 'sky':
+            # Sky rendering includes a catalogue projection; don't ask the
+            # live loop for a blanket 20 Hz when that work exceeds the budget.
+            self.interval = max(0.10, min(0.50, (time.monotonic() - started) * 1.25))
         return result
 
     def render(self, **_frame):
         now = time.monotonic()
         self.advance(now - self._last_tick)
         self._last_tick = now
-        return self.render_static()
+        # LiveApp snapshots its interval on entry. Bound expensive sky paints
+        # here instead of assuming later self.interval changes retune its loop.
+        key = (self.dimensions(), self.state.view,
+               tuple((k, v) for k, v in vars(self.state).items() if k != 'moment'),
+               self.help_open, self.location_edit, self.location_confirm,
+               self.location_text, self.location_error)
+        if (self.state.view == 'sky' and getattr(self, '_cached_key', None) == key
+                and now - getattr(self, '_painted_at', float('-inf')) < self.interval):
+            return self._cached_frame
+        self._cached_frame = self.render_static()
+        self._cached_key = key
+        self._painted_at = now
+        return self._cached_frame
 
     def text_mode(self):
         return True
 
     def intercept(self, action):
+        self._cached_key = None  # Every input gets an immediate frame.
         if self.location_edit:
             if action in ('escape', 'quit'):
                 self.location_edit = False
@@ -181,6 +244,7 @@ class OrreryApp(LiveApp):
                 except ValueError as exc:
                     self.location_error = str(exc)
                 else:
+                    self.state.location_inferred = False
                     self.location_edit = False
                     self.camera = None
                     self.state.note = 'Observer set locally. Coordinates are not sent anywhere.'
@@ -191,6 +255,15 @@ class OrreryApp(LiveApp):
                 self.location_text = ''
             elif action.startswith('char:') and action[5:].isascii() and len(self.location_text) < 48:
                 self.location_text += action[5:]
+            return True
+        if self.location_confirm:
+            if action in ('escape', 'quit', 'char:n', 'char:N'):
+                self.location_confirm = False
+                return True
+            if action in ('key:enter', 'char:y', 'char:Y'):
+                self.location_confirm = False
+                self.infer_location()
+                return True
             return True
         if self.help_open:
             self.help_open = False
@@ -248,6 +321,7 @@ class OrreryApp(LiveApp):
         cam.fly_to(az, max(8, alt))
 
     def on_action(self, key):
+        self._cached_key = None  # Every input gets an immediate frame.
         s = self.state
         cam = self.sky_camera() if s.view == 'sky' else None
         if key in (' ', 'p'):
@@ -259,6 +333,10 @@ class OrreryApp(LiveApp):
             s.note = 'UTC reset to now.'
         elif key == 'r':
             s.direction *= -1
+        elif key == 'b':
+            s.loop = not s.loop
+            s.note = ('Looping enabled; date wraps with overshoot.' if s.loop
+                       else 'Looping disabled; model endpoints hold.')
         elif key in ('.', ','):
             s.speed_index = max(0, min(len(SPEEDS) - 1, s.speed_index + (1 if key == '.' else -1)))
         elif key in ('[', ']'):
@@ -267,10 +345,13 @@ class OrreryApp(LiveApp):
             s.view = 'sky' if s.view == 'orbit' else 'orbit'
             s.playing = False
             s.note = 'Shared UTC clock paused on view change. Space resumes.'
+            self.interval = 1 / 20 if s.view == 'orbit' else 0.10
         elif key == 'l':
             self.location_edit = True
             self.location_text = '' if s.location is None else f'{s.location[0]:g},{s.location[1]:g}'
             self.location_error = ''
+        elif key == 'g':
+            self.location_confirm = True
         elif key in ('?', 'h'):
             self.help_open = True
         elif key in '123456789' and len(key) == 1:
@@ -302,7 +383,41 @@ class OrreryApp(LiveApp):
             return False
         return True
 
+    def infer_location(self):
+        """Opt-in public-IP lookup, without Linecast's cache/config writes."""
+        try:
+            from linecast._http import fetch_json
+            from linecast._location import PROVIDERS
+        except ImportError as exc:  # pragma: no cover - installed dependency
+            self.location_error = f'Approximate lookup unavailable: {exc}'
+            self.state.note = self.location_error
+            return False
+        deadline = time.monotonic() + 5.0
+        last_error = 'no provider succeeded'
+        for name, url, parse in PROVIDERS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                data = fetch_json(url, headers={'Accept': 'application/json'},
+                                  timeout=min(2.0, max(0.1, remaining)))
+                lat, lon, _country = parse(data)
+                location = parse_location(f'{lat},{lon}')
+            except Exception as exc:
+                last_error = f'{name}: {type(exc).__name__}'
+                continue
+            self.state.location = location
+            self.state.location_inferred = True
+            self.camera = None
+            self.state.note = ('Inferred/approximate public-IP location set for this session; '
+                               'not saved. Manual LAT,LON remains available.')
+            return True
+        self.state.note = f'Approximate public-IP lookup failed ({last_error}); sky remains usable offline.'
+        self.location_error = self.state.note
+        return False
+
     def on_wheel(self, direction, col, row):
+        self._cached_key = None  # Every input gets an immediate frame.
         if self.help_open or self.location_edit:
             return False
         cam = self.sky_camera() if self.state.view == 'sky' else None
@@ -313,6 +428,7 @@ class OrreryApp(LiveApp):
         return True
 
     def on_drag(self, dcol, drow, done):
+        self._cached_key = None  # Every input gets an immediate frame.
         if self.help_open or self.location_edit:
             return False
         cam = self.sky_camera() if self.state.view == 'sky' else None
@@ -329,6 +445,7 @@ class OrreryApp(LiveApp):
         return bool(dcol or drow)
 
     def on_click(self, col, row):
+        self._cached_key = None  # Every input gets an immediate frame.
         if self.help_open or self.location_edit:
             return False
         x, y = col - 1, row - 1
@@ -359,7 +476,7 @@ class _QuitRequested(Exception):
 
 def build_parser():
     parser = argparse.ArgumentParser(description='Orrery — offline solar-system instrument, powered by Linecast.',
-                                     epilog='UTC everywhere. ISO dates without an offset mean UTC. No location lookup or network access.')
+                                     epilog='UTC everywhere. ISO dates without an offset mean UTC. Location lookup is never used unless --infer-location or g is explicitly confirmed.')
     output = parser.add_mutually_exclusive_group()
     output.add_argument('--print', dest='print_frame', action='store_true', help='print one frame (use --date for reproducibility)')
     output.add_argument('--json', action='store_true', help='emit physical coordinates and state as JSON')
@@ -368,12 +485,22 @@ def build_parser():
     parser.add_argument('--width', type=int, help='frame width, 40..300 columns')
     parser.add_argument('--height', type=int, help='frame height, 16..100 rows')
     parser.add_argument('--view', choices=('orbit', 'sky'), default='orbit')
+    parser.add_argument('--loop', action='store_true', help='wrap the finite model date range (default: hold at endpoints)')
+    parser.add_argument('--infer-location', action='store_true', help='opt in to a public-IP approximate observing site; not saved')
+    parser.add_argument('--theme', choices=('orrery', 'native'), default='orrery', help='colour palette (default: orrery; native follows Linecast theme roles)')
     return parser
 
 
 def payload(state):
+    observer = None if state.location is None else {
+        'latitude': state.location[0], 'longitude': state.location[1]
+    }
+    if observer is not None and state.location_inferred:
+        observer.update(source='inferred/approximate public-IP', saved=False)
     result = {'application': 'Orrery', 'utc': state.moment.isoformat(), 'view': state.view,
-              'observer': None if state.location is None else {'latitude': state.location[0], 'longitude': state.location[1]},
+              'loop': state.loop,
+              'theme': state.theme,
+              'observer': observer,
               'selected': state.selected,
               'model': 'approximate heliocentric Keplerian elements; not for navigation',
               'referenceFrame': 'J2000 mean ecliptic/equinox; AU; UTC approximates TDB',
@@ -402,7 +529,10 @@ def main(argv=None):
     except ValueError as exc:
         parser.error(str(exc))
     state = State(moment=moment, location=location, view=args.view,
+                  loop=args.loop, theme=args.theme,
                   playing=not (args.print_frame or args.json or args.view == 'sky'))
+    if args.infer_location and location is None:
+        OrreryApp(state).infer_location()
     if args.json:
         print(json.dumps(payload(state), ensure_ascii=False, indent=2, allow_nan=False))
         return 0

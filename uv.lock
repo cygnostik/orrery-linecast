@@ -1,0 +1,45 @@
+version = 1
+revision = 3
+requires-python = ">=3.10"
+
+[[package]]
+name = "linecast"
+version = "2.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "truststore", marker = "sys_platform == 'win32'" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e4/24/09cbb97f2dc66f5e89c039451051f94422f3846fe84f8334bc23acc19e57/linecast-2.6.1.tar.gz", hash = "sha256:3cbe168d29bf73130a1c93106b32e498a42a28b3e7745c90122ec6e2c2cbe8b4", size = 8171180, upload-time = "2026-09-16T10:57:29.975Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/8f/4a7e4825bc1da002282dd24fe2956b3b8854499dec305bf45ac93c203110/linecast-2.6.1-py3-none-any.whl", hash = "sha256:79b403ba4965afc5c6af391b48fc613a04398bc14f4f66a5dff55b3c264781b8", size = 7792224, upload-time = "2026-09-16T10:57:27.472Z" },
+]
+
+[[package]]
+name = "orrery-linecast"
+version = "0.2.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "linecast" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "linecast", specifier = "==2.6.1" }]
+
+[[package]]
+name = "truststore"
+version = "0.10.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/53/a3/1585216310e344e8102c22482f6060c7a6ea0322b63e026372e6dcefcfd6/truststore-0.10.4.tar.gz", hash = "sha256:9d91bd436463ad5e4ee4aba766628dd6cd7010cf3e2461756b3303710eebc301", size = 26169, upload-time = "2025-08-12T18:49:02.73Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/97/56608b2249fe206a67cd573bc93cd9896e1efb9e98bce9c163bcdc704b88/truststore-0.10.4-py3-none-any.whl", hash = "sha256:adaeaecf1cbb5f4de3b1959b42d41f6fab57b2b1666adb59e89cb0b53361d981", size = 18660, upload-time = "2025-08-12T18:49:01.46Z" },
+]
+
+[[package]]
+name = "tzdata"
+version = "2026.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e4/31/3d74fa778a63b98b7374323befcc0be5ab3bd94afd4096a0124e7379152c/tzdata-2026.4.tar.gz", hash = "sha256:f1b8bd365d8d210c55353f4d7f8d6d8561c0ba50d704b700d195a9424bba0d79", size = 199350, upload-time = "2026-09-12T12:56:03.251Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/bc/8737e8d54cf51106118039b83f485a4783112fab49ea9d044b234978a46e/tzdata-2026.4-py2.py3-none-any.whl", hash = "sha256:c2169a8b0a7a5e9674da5a135ccdfb2b3e671b333ed9fed17b41f73c34476e81", size = 347494, upload-time = "2026-09-12T12:56:01.67Z" },
+]

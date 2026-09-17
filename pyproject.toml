@@ -1,0 +1,15 @@
+[project]
+name = "orrery-linecast"
+version = "0.2.0"
+description = "An interactive orbital instrument and observing companion for Linecast."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = ["linecast==2.6.1"]
+
+[project.urls]
+Homepage = "https://github.com/cygnostik/orrery-linecast"
+Issues = "https://github.com/cygnostik/orrery-linecast/issues"
+
+[tool.uv]
+package = false

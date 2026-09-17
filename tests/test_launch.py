@@ -17,6 +17,19 @@ class LaunchTests(unittest.TestCase):
         import launch
         self.assertTrue(launch.usable_python(sys.executable))
 
+    def test_other_linecast_version_is_not_usable(self):
+        import launch
+        import subprocess
+        real_run = subprocess.run
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, 'linecast.py').write_text("__version__ = '2.6.0'\n", encoding='utf-8')
+            def probe(command, **kwargs):
+                command = list(command)
+                command[-1] = 'import sys; sys.path.insert(0, ' + repr(directory) + '); ' + command[-1]
+                return real_run(command, **kwargs)
+            with patch.object(launch.subprocess, 'run', side_effect=probe):
+                self.assertFalse(launch.usable_python(sys.executable))
+
     def test_missing_interpreter_is_not_usable(self):
         import launch
         self.assertFalse(launch.usable_python('/not-an-interpreter/python'))

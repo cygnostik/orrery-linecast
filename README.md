@@ -1,106 +1,104 @@
-# Orrery — a Linecast companion
+# Orrery for Linecast
 
-An animated orbital instrument and an adjacent observation view, sharing one UTC clock. Built for an existing **Linecast 2.6.1** installation. No bundled Linecast, sky catalogues, Python runtime, fonts or web assets.
+An interactive orbital instrument with a linked observing view and one UTC clock. Eight planets and Pluto, selectable portraits, simulated time, and physical or spaced orbital distances, drawn in your terminal.
 
-## Open it
+![Orrery: Saturn selected, spaced orbital lanes, paused simulation](docs/images/orbit.png)
 
-Unzip the whole folder, then:
+**Independent companion for Linecast 2.6.1.** It does not replace Linecast or modify its installed source. Python 3.10+ and a Unicode terminal are required. MIT licensed.
 
-- **macOS:** double-click `Start Orrery.command`.
-- **Linux:** run `sh "Start Orrery.command"`.
-- **Windows:** double-click `Start Orrery.bat`; Windows Terminal is recommended.
-- **From a terminal:** `python3 launch.py` (or `py -3 launch.py` on Windows).
+## Run
 
-The launcher discovers the Python environment that already contains Linecast. It does not install anything, change your Linecast configuration or modify the package. Orrery uses Python 3.10+ from that environment. The small discovery launcher itself can run with Python 3.8+.
+With [uv](https://docs.astral.sh/uv/):
 
-A Unicode-capable colour terminal is required. Use **120×40** or larger for the full portrait/readout layout; **80×24** has a compact layout. Truecolour offers the richest shading. Standard terminal fonts work; Nerd Fonts are not required.
+```sh
+git clone https://github.com/cygnostik/orrery-linecast.git
+cd orrery-linecast
+uv sync --locked
+uv run python launch.py
+```
 
-The live application and macOS launcher were exercised on macOS. The Windows launcher is supplied but has not been run on Windows in this release.
+Already have Linecast 2.6.1? Download/extract the source and run `python3 launch.py` (`py -3 launch.py` on Windows). The launcher finds its Python environment without installing anything. `Start Orrery.command` and `Start Orrery.bat` are optional convenience launchers.
 
-## Use it
+Use **120×40 cells or larger** for the portrait/readout layout. **80×24** uses a compact layout. Truecolour is recommended; 256-colour, 16-colour and no-colour output are supported. No special font or Nerd Font is required.
 
-| Key / action | Effect |
-|---|---|
-| Space or `p` | Pause/play without resetting the date |
-| `,` / `.` | Slower/faster simulation |
+```sh
+uv run python launch.py --loop
+uv run python launch.py --theme native
+uv run python launch.py --view sky --location=51.48,0
+uv run python launch.py --date 2400-01-01 --loop
+uv run python launch.py --print --width 120 --height 40
+uv run python launch.py --json --date 2000-01-01T12:00:00Z
+uv run python launch.py --diagnose
+```
+
+`--theme orrery` is the default authored dark palette. `--theme native` follows Linecast's terminal-theme roles. `NO_COLOR=1` disables ANSI colour.
+
+## Time and controls
+
+Orbit opens animated at six simulated days per real second; entering the observing view pauses at the same instant. Dates without an offset mean UTC. Static and JSON output never animate.
+
+Time stops at the model boundary by default. **`--loop` or `b`** enables forward/reverse wrapping across the supported interval. Looping is a playback control, not a claim that the solar system repeats exactly at either endpoint. See [model range and accuracy](docs/astronomy.md).
+
+| Key | Action |
+| --- | --- |
+| Space / `p` | Pause/play |
+| `,` / `.` | Slower/faster |
 | `r` | Reverse time |
-| `[` / `]` | Step backward/forward one day and pause |
-| Left/right arrows | Step a day in orbit, 15 minutes in sky |
-| `n` | Return to the current UTC time and pause |
-| Tab or `1`–`9` | Select a planet; `9` selects Pluto |
-| Click body, label or bottom inventory | Select a body |
-| `+` / `-` or mouse wheel | Zoom |
-| `a` / `d` or drag | Rotate orbital view |
-| `u` | Spaced orbital lanes / true-AU distance scale |
-| `i` | Inner system / full system |
+| `b` | Toggle looping |
+| `[` / `]` | Step a day and pause |
+| Left/right | Step a day in orbit, 15 minutes in sky |
+| `n` | Current UTC time, paused |
+| Tab / `1`–`9` | Select a planet; `9` selects Pluto |
+| Click a body, label or inventory | Select a body |
+| `+` / `-` / wheel | Zoom |
+| `a` / `d` / drag | Rotate orbit |
+| `u` | Spaced lanes / physical AU distances |
+| `i` | Inner / full system |
 | `t` | Tilted / top-down projection |
-| `v` | Switch orbit / observation; pause at the same UTC instant |
-| `l` | Enter latitude,longitude; Enter saves, Esc cancels |
-| WASD or drag in sky | Look around |
+| `v` | Orbit / observing view |
+| `l` | Enter latitude,longitude |
+| `g` | Offer approximate IP-based location inference |
+| WASD / drag in sky | Look around |
 | `c` in sky | Cycle constellation figures |
 | `m` in sky | Face the Moon |
-| `0` | Reset the camera |
+| `0` | Reset camera |
 | `?` | Controls and field notes |
-| `q` | Quit and restore the terminal |
+| `q` | Quit and restore terminal |
 
-Orbit opens animated at six simulated days per real second. Observation mode is paused on entry. The date and speed remain visible. Sky mode uses Linecast's native sky renderer, star and constellation catalogues, Milky Way, planetary positions, Sun and Moon. Select a planet to aim toward it; below-horizon targets are identified as such. Earth is the observation platform, and Pluto is not part of Linecast's sky ephemeris.
+## Observing site
 
-### Your observing site
+![Linked sky view with an explicit example observing site](docs/images/sky.png)
 
-No site is inferred. Press `l` and enter decimal degrees, latitude first and east-positive longitude second. Coordinates remain in memory for the current run; they are not saved or sent over the network.
+**No location inference happens by default.** Supply `--location=LAT,LON` or press `l` for manual coordinates. Use an equals sign for a negative latitude, such as `--location=-34,-70`.
 
-To supply a site on launch (the following is a Los Angeles example, not an inferred location):
+Press **`g` in either view** to request inference and confirm the public-IP lookup. Alternatively, **`--infer-location`** explicitly opts in at launch. This sends a request to a third-party location provider, which sees the connection's public IP. It is approximate: VPNs, proxies, shared connections and remote machines can place it somewhere other than the observer. The result is labelled inferred and can be replaced manually. Failed lookups leave manual entry available.
 
-```sh
-python3 launch.py --location 34.05,-118.25 --view sky
-```
+The observing site is shared by both views and exists only in memory. It changes the local sky, not the heliocentric orbit geometry. There is no location file, telemetry, or automatic geocoding.
 
-For a negative latitude, use an equals sign:
+## What the picture means
 
-```sh
-python3 launch.py --location=-34,-70 --view sky
-```
+- Heliocentric positions use approximate JPL Keplerian elements. The [astronomy notes](docs/astronomy.md) identify the ranges, coefficients, frame and independent numerical checks.
+- In the orbital model, Earth means the **Earth–Moon barycenter**. Coordinates are heliocentric J2000 mean-ecliptic/equinox, in AU; UTC approximates dynamical time.
+- Spaced lanes retain each ellipse's shape but change its display distance. Physical-AU mode uses actual model distances. Body markers and portraits are illustrative, not physical size scales or surface maps.
+- The sky is **Linecast's separate observer-centred model**. It shares the clock, not the orbital algorithm. Extending the orbit model does not certify sky accuracy over the extended interval. Pluto has no corresponding Linecast sky target; Earth is the observing platform.
 
-### Other commands
+This is an educational visual instrument, not a precision ephemeris or navigation tool.
 
-```sh
-python3 launch.py --date 2026-09-16T05:00:00Z
-python3 launch.py --print --width 120 --height 40
-python3 launch.py --json --date 2000-01-01T12:00:00Z
-python3 launch.py --diagnose
-```
-
-Dates without an offset are interpreted as UTC. `--print` renders a static frame; `--json` exports physical positions rather than display-scaled geometry. Neither starts animation. `--width` and `--height` are useful for static output; omit them for live resizing.
-
-## What is being drawn
-
-Orbital positions reuse the original Orrery's approximate JPL Keplerian model, including eccentricity, inclination and secular element rates. The accepted interval is **1800-01-01 through 2050-01-01 UTC**, inclusive. Earth is the **Earth–Moon barycenter** in this orbital model. Reference frame: heliocentric J2000 mean ecliptic/equinox; distances in AU. UTC is used as an approximation to dynamical time.
-
-Spaced mode assigns readable orbital lanes while retaining each ellipse's shape. True-AU mode uses physical orbital distances. Body markers and the shaded sidebar portraits are illustrative, not physical size scales or surface maps. The radial profile is sampled along the fitted ellipse, not a time-axis forecast.
-
-Observation uses **Linecast's separate observer-centred ephemeris**, evaluated at the same instant. It is an educational observing display, not a precision navigation instrument.
-
-## If it does not open
-
-1. Run `python3 launch.py --diagnose` from the terminal where `linecast` works.
-2. The printed Linecast version should be **2.6.1**. This companion uses internal renderer APIs; compatibility with other versions is not assumed.
-3. If the launcher cannot discover a custom installation, use its interpreter directly:
-   `/path/to/linecast-environment/python app.py`.
-4. On macOS, if executable permissions were lost during extraction, run `sh "Start Orrery.command"`.
-5. If the application asks for more room, enlarge the terminal. At least 60×20 cells are needed.
-
-No application configuration is written. Running the companion does not add an `orrery` subcommand to Linecast.
-
-## Source and tests
-
-`app.py` owns clock, input and view state; `render.py` composes the instrument and embeds Linecast's sky; `astronomy.py` contains the dependency-free orbital model; `launch.py` locates the installed dependency.
-
-Run tests with the Python interpreter containing Linecast:
+## Tests and development
 
 ```sh
-/path/to/linecast-environment/python -B -m unittest discover -s tests -v
+uv run python -B -m unittest discover -s tests -v
+uv run python -B scripts/stress.py
+# POSIX controlling-TTY checks; Linux/macOS only:
+uv run python -B scripts/pty_smoke.py --cycles 3
 ```
 
-The included numerical fixtures are portable references from the original Orrery. Node and the original web project are not required.
+The unit suite includes clock boundaries, looping, parsing, layout, theme isolation, offline location-provider mocks and astronomical regression fixtures. CI covers the platforms listed in [the workflow](.github/workflows/tests.yml). Unit CI does not certify every terminal emulator or native GUI launcher. Linux controlling-TTY checks exercise resizing, modal controls, signals and terminal restoration.
 
-MIT licence. Copyright (c) 2026 Chris M. / Promethean Dynamic. Linecast by Andrew Shuttleworth is a separately installed dependency. See `THIRD-PARTY-NOTICES.md` and `LICENSE`.
+Reproduce the demonstration frames with `uv run --with pillow --with rich python scripts/capture_demo.py`. The captures use a fixed simulated UTC instant and explicit Greenwich-area coordinates, not inferred user data. Supply `--font` if the default development font path is unavailable.
+
+The launcher accepts only Linecast **2.6.1**. This companion deliberately uses version-pinned internal APIs, including scoped adapters. A separate native integration is being prepared in [`cygnostik/linecast`, `feat/orrery`](https://github.com/cygnostik/linecast/tree/feat/orrery); it is not an upstream release or endorsement.
+
+See [contributing](CONTRIBUTING.md), [third-party notices](THIRD-PARTY-NOTICES.md), and [MIT licence](LICENSE).
+
+[ORRERY.ProDyn.ai](https://orrery.prodyn.ai) · [ProDyn.ai](https://prodyn.ai)

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from linecast._graphics import Framebuffer, RESET, fg, bg, lerp
 from linecast._braille import build_braille_curve
@@ -28,6 +30,42 @@ BODY_COLORS = {
 }
 BODY_BY_ID = {b['id']: b for b in BODIES}
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
+SKY_MODERN_START = datetime(1900, 1, 1, tzinfo=timezone.utc)
+SKY_MODERN_END = datetime(2100, 1, 1, tzinfo=timezone.utc)
+
+
+@dataclass(frozen=True)
+class Palette:
+    field: tuple[int, int, int]
+    ivory: tuple[int, int, int]
+    cyan: tuple[int, int, int]
+    copper: tuple[int, int, int]
+    muted: tuple[int, int, int]
+    dim: tuple[int, int, int]
+    rule: tuple[int, int, int]
+    brand: tuple[int, int, int]
+    body_colors: dict
+
+
+ORRERY_PALETTE = Palette(FIELD, IVORY, CYAN, COPPER, MUTED, DIM, RULE,
+                         (94, 145, 190), BODY_COLORS)
+
+
+def palette_for(theme):
+    """Return a per-render palette; never mutate module or terminal globals."""
+    if theme == 'orrery':
+        return ORRERY_PALETTE
+    from linecast import _theme
+    _theme.ensure_theme_loaded()
+    field, ivory = _theme.theme_bg, _theme.theme_fg
+    cyan = _theme.ensure_contrast(_theme.themed((48, 176, 208)), field, 3.0)
+    copper = _theme.ensure_contrast(_theme.themed((200, 90, 46)), field, 2.5)
+    muted = _theme.ensure_contrast(_theme.neutral_tone(0.58), field, 2.5)
+    dim = _theme.ensure_contrast(_theme.neutral_tone(0.38), field, 1.8)
+    rule = _theme.neutral_tone(0.16)
+    brand = _theme.ensure_contrast(_theme.themed((78, 135, 194)), field, 2.5)
+    bodies = {key: _theme.themed(color) for key, color in BODY_COLORS.items()}
+    return Palette(field, ivory, cyan, copper, muted, dim, rule, brand, bodies)
 
 
 def plain(text):
@@ -36,9 +74,10 @@ def plain(text):
 
 class Canvas:
     """Fixed-cell, clipped canvas; colour changes are emitted only as needed."""
-    def __init__(self, width, height):
+    def __init__(self, width, height, palette=None):
         self.width, self.height = width, height
-        self.cells = [[(' ', IVORY, FIELD) for _ in range(width)] for _ in range(height)]
+        self.palette = palette or ORRERY_PALETTE
+        self.cells = [[(' ', self.palette.ivory, self.palette.field) for _ in range(width)] for _ in range(height)]
 
     def put(self, x, y, char, ink=IVORY, paper=FIELD):
         x, y = int(x), int(y)
@@ -106,8 +145,10 @@ def project_orbit(point, body, state, width, height):
     return width * 0.5 + x * scale, height * 0.49 - vertical * scale * 0.5, depth
 
 
-def draw_curve(canvas, points, x0, y0, w, h, color, selected=False):
+def draw_curve(canvas, points, x0, y0, w, h, color, selected=False, palette=None):
     """Rasterise projected 3-D orbit segments with Linecast's 2×4 braille bits."""
+    palette = palette or ORRERY_PALETTE
+    FIELD = palette.field
     dots = {}
     for a, b in zip(points, points[1:]):
         ax, ay, az = a
@@ -133,12 +174,14 @@ def draw_curve(canvas, points, x0, y0, w, h, color, selected=False):
         canvas.put(x0 + col, y0 + row, chr(0x2800 + bits), ink)
 
 
-def portrait(body_id, width=24, height=9):
+def portrait(body_id, width=24, height=9, palette=None):
     """A deliberately illustrative disc, lit from upper left; not a map.
 
     Uses Linecast's framebuffer and sub-pixel blending, at equal display size.
     No rendered features are claimed as observed or geographically accurate.
     """
+    palette = palette or ORRERY_PALETTE
+    FIELD, IVORY, BODY_COLORS = palette.field, palette.ivory, palette.body_colors
     fb = Framebuffer(width, height, bg_color=FIELD)
     base = BODY_COLORS[body_id]
     radius = min(width * 0.39, height * 0.87)
@@ -194,7 +237,11 @@ def portrait(body_id, width=24, height=9):
     return fb
 
 
-def draw_orbits(canvas, state, x0, y0, w, h):
+def draw_orbits(canvas, state, x0, y0, w, h, palette=None):
+    palette = palette or ORRERY_PALETTE
+    CYAN, MUTED, DIM, RULE, COPPER = (palette.cyan, palette.muted, palette.dim,
+                                       palette.rule, palette.copper)
+    BODY_COLORS = palette.body_colors
     hits = []
     geometry = {}
     ordered = sorted(state.bodies, key=lambda b: b['id'] == state.selected)
@@ -203,9 +250,9 @@ def draw_orbits(canvas, state, x0, y0, w, h):
         geometry[body['id']] = pts
         projected = [project_orbit(p, body, state, w, h) for p in pts]
         draw_curve(canvas, projected, x0, y0, w, h,
-                   CYAN if body['id'] == state.selected else BODY_COLORS[body['id']], body['id'] == state.selected)
+                   CYAN if body['id'] == state.selected else BODY_COLORS[body['id']], body['id'] == state.selected, palette)
     sx, sy = x0 + int(w * 0.5), y0 + int(h * 0.49)
-    canvas.put(sx, sy, '☉', (234, 191, 121))
+    canvas.put(sx, sy, '☉', COPPER)
     taken = {(sx, sy)}
     projected_bodies = []
     # Selected labels have first claim; all actual markers are reserved first.
@@ -242,14 +289,16 @@ def draw_orbits(canvas, state, x0, y0, w, h):
     return hits, geometry
 
 
-def sidebar(canvas, state, x, y, width, height, geometry):
+def sidebar(canvas, state, x, y, width, height, geometry, palette=None):
+    palette = palette or ORRERY_PALETTE
+    FIELD, IVORY, CYAN, DIM = palette.field, palette.ivory, palette.cyan, palette.dim
     body = BODY_BY_ID[state.selected]
     p = position_at(state.selected, state.moment)
     canvas.text(x, y, f'{BODIES.index(body) + 1:02d} / SELECTED BODY', CYAN)
     canvas.text(x, y + 2, body['name'].upper(), IVORY)
     disc_h = 8 if height >= 25 else 5
     disc_w = min(width - 1, 24)
-    canvas.framebuffer(x, y + 4, portrait(state.selected, disc_w, disc_h))
+    canvas.framebuffer(x, y + 4, portrait(state.selected, disc_w, disc_h, palette))
     yy = y + 4 + disc_h
     canvas.text(x, yy, 'ILLUSTRATIVE · NOT TO SCALE', DIM)
     yy += 2
@@ -270,7 +319,9 @@ def sidebar(canvas, state, x, y, width, height, geometry):
             canvas.text(x, yy + 1 + row, ''.join(ch for ch, _ in cells), lerp(FIELD, CYAN, 0.7))
 
 
-def inventory(canvas, state, row):
+def inventory(canvas, state, row, palette=None):
+    palette = palette or ORRERY_PALETTE
+    CYAN, MUTED, DIM = palette.cyan, palette.muted, palette.dim
     hits = []
     short = canvas.width < 105
     items = [f"{i + 1} {b['name'][:3] if short else b['name']}" for i, b in enumerate(BODIES)]
@@ -312,7 +363,10 @@ def sky_lines(state, width, height, camera):
         sky.get_terminal_size, sky.install_banner = original_size, original_banner
 
 
-def modal(canvas, title, lines):
+def modal(canvas, title, lines, palette=None):
+    palette = palette or ORRERY_PALETTE
+    FIELD, IVORY, CYAN, MUTED, RULE = (palette.field, palette.ivory, palette.cyan,
+                                        palette.muted, palette.rule)
     w = min(canvas.width - 6, max(len(title) + 4, max(map(len, lines), default=0) + 4))
     h = min(canvas.height - 4, len(lines) + 4)
     x, y = (canvas.width - w) // 2, (canvas.height - h) // 2
@@ -322,6 +376,10 @@ def modal(canvas, title, lines):
     for i, line in enumerate(lines[:h - 3]):
         canvas.text(x + 2, y + 2 + i, line[:w - 4], IVORY if i == 0 else MUTED)
     canvas.text(x, y + h - 1, '─' * w, RULE)
+    brand = ' ProDyn.ai '
+    if w >= len(brand) + 4:
+        bx = x + (w - len(brand)) // 2
+        canvas.text(bx, y + h - 1, brand, palette.brand)
 
 
 HELP = [
@@ -337,38 +395,49 @@ HELP = [
     'u             spaced / true AU    i  inner / all',
     't             tilted / top-down   v  orbit / sky',
     'l             enter LAT,LON       c  sky figures',
+    'b             loop date range (off by default)',
+    'g             confirm public-IP approximate lookup',
     'm             face the Moon       q  quit',
     '',
     'Orbits: approximate Keplerian elements, not navigation.',
     'Spaced lanes & body discs are not physical size scales.',
     'Sky: Linecast ephemeris + real local star catalogues.',
     'Earth orbit represents the Earth–Moon barycentre.',
-    'No location lookup. Press any key to return.',
+    'No lookup unless g is explicitly confirmed. Press any key to return.',
 ]
 
 
 def render_frame(state, width, height, camera=None, *, help_open=False,
-                 location_text=None, location_error=''):
+                 location_confirm=False, location_text=None, location_error=''):
     width, height = max(1, width), max(1, height)
-    canvas = Canvas(width, height)
+    palette = palette_for(state.theme)
+    FIELD, IVORY, CYAN = palette.field, palette.ivory, palette.cyan
+    MUTED, DIM, RULE = palette.muted, palette.dim, palette.rule
+    canvas = Canvas(width, height, palette)
     if width < 60 or height < 20:
         canvas.text(2, 1, 'ORRERY', IVORY)
         canvas.text(2, 3, 'Please resize to at least 60 × 20.', MUTED)
         canvas.text(2, 5, 'Recommended: 80 × 24 or 120 × 40.', DIM)
         canvas.text(2, 7, 'q quit · ? help', CYAN)
+        canvas.text(2, 9, 'LOOP ON' if state.loop else 'LOOP OFF', MUTED)
         return '\n'.join(canvas.lines()), []
     wide = width >= 106 and height >= 30
     canvas.text(2, 1, 'O R R E R Y', IVORY)
     canvas.text(17, 1, 'ORBITAL INSTRUMENT' if state.view == 'orbit' else 'OBSERVATION', DIM)
-    clock = state.moment.strftime('%Y-%m-%d  %H:%M UTC')
+    clock = state.moment.date().isoformat() + state.moment.strftime('  %H:%M UTC')
     canvas.text(width - len(clock) - 2, 1, clock, MUTED)
     canvas.text(2, 2, '─' * (width - 4), RULE)
     status = ('PLAY' if state.playing else 'HOLD') + f'  {"+" if state.direction > 0 else "−"}{state.speed:g} d/s'
+    status += '  LOOP' if state.loop else '  BOUNDED'
     canvas.text(2, 3, status, CYAN if state.playing else MUTED)
     if state.view == 'orbit':
         modes = f'{"INNER" if state.inner else "SOLAR SYSTEM"}  /  {"TILTED" if state.tilted else "TOP-DOWN"}  /  {state.zoom:.2f}×'
     else:
-        modes = 'OBSERVER UNSET' if state.location is None else f'{state.location[0]:+.3f}°, {state.location[1]:+.3f}°  /  UTC'
+        if state.location is None:
+            modes = 'OBSERVER UNSET'
+        else:
+            source = 'INFERRED / APPROX' if state.location_inferred else 'MANUAL SITE'
+            modes = f'{state.location[0]:+.3f}°, {state.location[1]:+.3f}°  /  {source}'
     canvas.text(width - len(modes) - 2, 3, modes, DIM)
     sky_slice = None
     hits = []
@@ -376,44 +445,63 @@ def render_frame(state, width, height, camera=None, *, help_open=False,
         bottom = height - 7
         plot_w = width - 34 if wide else width - 2
         plot_y = 5 if wide else 4
-        hits, geometry = draw_orbits(canvas, state, 1, plot_y, plot_w, bottom - plot_y)
+        hits, geometry = draw_orbits(canvas, state, 1, plot_y, plot_w, bottom - plot_y, palette)
         if wide:
             for y in range(5, height - 6):
                 canvas.put(width - 31, y, '│', RULE)
-            sidebar(canvas, state, width - 28, 5, 26, height - 11, geometry)
+            sidebar(canvas, state, width - 28, 5, 26, height - 11, geometry, palette)
         else:
             b = BODY_BY_ID[state.selected]
             pos = position_at(state.selected, state.moment)
             canvas.text(3, height - 7, f"{b['name'].upper()}  {pos['radiusAU']:.3f} AU from Sun  /  {b['periodDays']:,.1f} d orbit", MUTED)
-        hits += inventory(canvas, state, height - 5)
+        hits += inventory(canvas, state, height - 5, palette)
     else:
         image_h = height - 10
         if state.location is None:
             y = max(6, height // 2 - 3)
             canvas.text(5, y, 'THE SKY NEEDS A PLACE TO STAND.', IVORY)
             canvas.text(5, y + 2, 'Press l to enter latitude,longitude.', CYAN)
-            canvas.text(5, y + 4, 'No IP lookup. No inferred location. Entirely offline.', MUTED)
+            canvas.text(5, y + 3, 'No IP lookup unless you confirm it.', MUTED)
+            canvas.text(5, y + 4, 'Press g for an optional approximate IP lookup.', MUTED)
             canvas.text(5, y + 5, 'Example format: 34.05,-118.25  (not your location)', DIM)
+        elif camera is not None and not (SKY_MODERN_START <= state.moment <= SKY_MODERN_END):
+            canvas.text(5, max(6, height // 2 - 1),
+                        'SKY DATE OUTSIDE MODERN INTERVAL.', IVORY)
+            canvas.text(5, max(6, height // 2 + 1),
+                        'Educational display only; no sky frame rendered.', MUTED)
         elif camera is not None:
             sky_slice = (5, sky_lines(state, width, image_h, camera))
             canvas.text(2, height - 5, f'LINECAST SKY  /  AZ {camera.az:05.1f}°  ALT {camera.alt:04.1f}°  FOV {camera.fov:.0f}°', DIM)
     note = state.note
     if not note:
         note = 'Keplerian model · sizes illustrative · Linecast 2.6.1' if state.view == 'orbit' else 'Real sky / local catalogues · stars emerge after twilight · same UTC'
-    canvas.text(2, height - 4, note[:width - 4], DIM)
+    brand = 'ORRERY.ProDyn.ai'
+    brand_x = width - len(brand) - 2
+    canvas.text(2, height - 4, note[:max(0, brand_x - 4)], DIM)
+    if brand_x >= 2:
+        canvas.text(brand_x, height - 4, 'ORRERY', IVORY)
+        canvas.text(brand_x + len('ORRERY'), height - 4, '.ProDyn.ai', palette.brand)
     canvas.text(2, height - 3, '─' * (width - 4), RULE)
     if state.view == 'orbit':
-        controls = 'Space play   Tab select   u scale   i system   v sky   ? help   q quit'
+        controls = 'Space play   Tab select   b loop   v sky   ? help   q quit'
     else:
-        controls = 'Space play   WASD look   +/- zoom   l site   v orbit   ? help   q quit'
+        controls = 'Space play   WASD look   +/- zoom   l site   g infer   v orbit   ? help   q quit'
     canvas.text(2, height - 2, controls[:width - 4], MUTED)
     # Flat modal composition also works in --print, with exact dimensions.
     if help_open:
         if height < 28:
-            lines = [HELP[i] for i in (0, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 15, 17)]
+            lines = [HELP[i] for i in (0, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 17, 20)]
         else:
             lines = HELP
-        modal(canvas, 'CONTROLS / FIELD NOTES', lines)
+        modal(canvas, 'CONTROLS / FIELD NOTES', lines, palette)
+        sky_slice = None
+    if location_confirm:
+        modal(canvas, 'INFER OBSERVING SITE?', [
+            'This will query a public-IP approximate lookup.',
+            'No location is saved or cached.',
+            'The result is labeled inferred / approximate.',
+            '', 'Enter or y: continue   Esc: cancel',
+        ], palette)
         sky_slice = None
     if location_text is not None:
         modal(canvas, 'OBSERVER / DECIMAL COORDINATES', [
@@ -421,7 +509,7 @@ def render_frame(state, width, height, camera=None, *, help_open=False,
             '', location_text + '▏', '',
             (location_error or 'Stored in this session only. No network request.')[:width - 12],
             'Enter save  ·  Esc cancel  ·  Ctrl-U clear',
-        ])
+        ], palette)
         sky_slice = None
     lines = canvas.lines()
     if sky_slice is not None:

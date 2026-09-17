@@ -1,9 +1,11 @@
 """Dependency-free port of Orrery's JPL approximate Keplerian model.
 
-Sources: https://ssd.jpl.nasa.gov/planets/approx_pos.html (Table 1), and
-https://ssd.jpl.nasa.gov/ftp/eph/planets/ioms/ExplSupplChap8.pdf (original
-Table 8.10.2, including Pluto). Coefficients, secular rates, Newton solver,
-and rotations retain the original science.js model, without Table 2b terms.
+Sources: https://ssd.jpl.nasa.gov/planets/approx_pos.html (Tables 1, 2a,
+and 2b), and https://ssd.jpl.nasa.gov/ftp/eph/planets/ioms/ExplSupplChap8.pdf
+(original Tables 8.10.2--8.10.4, including Pluto). The original Table 1
+coefficients and behavior are retained for 1800--2050. Outside that interval
+the official long-range Table 2a coefficients are used, with its mandatory
+Table 2b mean-anomaly corrections for Jupiter through Pluto.
 
 Positions are heliocentric J2000 mean ecliptic/equinox coordinates in AU;
 x points toward the equinox and z toward ecliptic north. Earth denotes the
@@ -12,11 +14,15 @@ no leap-second, light-time, or apparent-position corrections are made.
 This is educational geometry, not a precision ephemeris or navigation tool;
 Pluto retains the lower-accuracy original fit, not modern Horizons values.
 
-Aware datetimes are normalized to UTC. The inclusive range is UTC midnight
-1800-01-01 through 2050-01-01, conservatively NOT the end of 2050. Orbit
-paths are instantaneous fitted ellipses sampled in eccentric anomaly, not
-integrated future trajectories. Physical descriptors are fixed references;
-the position solver uses secular rates, not periodDays or display scaling.
+Aware datetimes are normalized to UTC. The inclusive supported range is UTC
+midnight 0001-01-01 through 3000-01-01. This is the AD subset representable
+by Python's datetime; the source Table 2 fit itself is stated for 3000 BC--
+3000 AD. The long-range model is not a claim of BC support. Table 1 remains
+the exact model for 1800-01-01 through 2050-01-01 inclusive, so switching at
+the endpoints is intentionally discontinuous. Orbit paths are instantaneous
+fitted ellipses sampled in eccentric anomaly, not integrated trajectories.
+Physical descriptors are fixed references; the position solver uses secular
+rates, not periodDays or display scaling.
 
 Radii (volume-equivalent mean km) and sidereal periods (Julian years times
 365.25) come from https://ssd.jpl.nasa.gov/planets/phys_par.html. Mercury's
@@ -29,8 +35,10 @@ from datetime import datetime, timezone
 import math
 
 
-MIN_DATE = datetime(1800, 1, 1, tzinfo=timezone.utc)
-MAX_DATE = datetime(2050, 1, 1, tzinfo=timezone.utc)
+MIN_DATE = datetime(1, 1, 1, tzinfo=timezone.utc)
+MAX_DATE = datetime(3000, 1, 1, tzinfo=timezone.utc)
+_TABLE1_MIN = datetime(1800, 1, 1, tzinfo=timezone.utc)
+_TABLE1_MAX = datetime(2050, 1, 1, tzinfo=timezone.utc)
 _J2000 = datetime(2000, 1, 1, 12, tzinfo=timezone.utc)
 _CENTURY_SECONDS = 36525 * 86400
 _DEG = math.pi / 180
@@ -56,6 +64,41 @@ _ELEMENTS = {
                 (0.00026291, 0.00005105, 0.00035372, 218.45945325, -0.32241464, -0.00508664)),
     "pluto": ((39.48211675, 0.24882730, 17.14001206, 238.92903833, 224.06891629, 110.30393684),
               (-0.00031596, 0.00005170, 0.00004818, 145.20780515, -0.04062942, -0.01183482)),
+}
+
+# Table 2a / original Table 8.10.3: 3000 BC--3000 AD. Each tuple is
+# (value at J2000, secular rate per Julian century).
+_LONG_RANGE_ELEMENTS = {
+    "mercury": ((0.38709843, 0.20563661, 7.00559432, 252.25166724, 77.45771895, 48.33961819),
+                 (0.00000000, 0.00002123, -0.00590158, 149472.67486623, 0.15940013, -0.12214182)),
+    "venus": ((0.72332102, 0.00676399, 3.39777545, 181.97970850, 131.76755713, 76.67261496),
+              (-0.00000026, -0.00005107, 0.00043494, 58517.81560260, 0.05679648, -0.27274174)),
+    "earth": ((1.00000018, 0.01673163, -0.00054346, 100.46691572, 102.93005885, -5.11260389),
+              (-0.00000003, -0.00003661, -0.01337178, 35999.37306329, 0.31795260, -0.24123856)),
+    "mars": ((1.52371243, 0.09336511, 1.85181869, -4.56813164, -23.91744784, 49.71320984),
+             (0.00000097, 0.00009149, -0.00724757, 19140.29934243, 0.45223625, -0.26852431)),
+    "jupiter": ((5.20248019, 0.04853590, 1.29861416, 34.33479152, 14.27495244, 100.29282654),
+                (-0.00002864, 0.00018026, -0.00322699, 3034.90371757, 0.18199196, 0.13024619)),
+    "saturn": ((9.54149883, 0.05550825, 2.49424102, 50.07571329, 92.86136063, 113.63998702),
+               (-0.00003065, -0.00032044, 0.00451969, 1222.11494724, 0.54179478, -0.25015002)),
+    "uranus": ((19.18797948, 0.04685740, 0.77298127, 314.20276625, 172.43404441, 73.96250215),
+               (-0.00020455, -0.00001550, -0.00180155, 428.49512595, 0.09266985, 0.05739699)),
+    "neptune": ((30.06952752, 0.00895439, 1.77005520, 304.22289287, 46.68158724, 131.78635853),
+                (0.00006447, 0.00000818, 0.00022400, 218.46515314, 0.01009938, -0.00606302)),
+    # Pluto is retained from the official original PDF, which the current
+    # HTML page omits because Pluto was removed from its planet list.
+    "pluto": ((39.48686035, 0.24885238, 17.14104260, 238.96535011, 224.09702598, 110.30167986),
+              (0.00449751, 0.00006016, 0.00000501, 145.18042903, -0.00968827, -0.00809981)),
+}
+
+# Table 2b / original Table 8.10.4. Units are degrees, degrees, degrees,
+# degrees per century; the correction is added to M in degrees.
+_LONG_RANGE_ANOMALY = {
+    "jupiter": (-0.00012452, 0.06064060, -0.35635438, 38.35125000),
+    "saturn": (0.00025899, -0.13434469, 0.87320147, 38.35125000),
+    "uranus": (0.00058331, -0.97731848, 0.17689245, 7.67025000),
+    "neptune": (-0.00041348, 0.68346318, -0.10162547, 7.67025000),
+    "pluto": (-0.01262724, 0.0, 0.0, 0.0),
 }
 _PROPERTIES = (
     ("mercury", 2439.4, 0.2408467, 2.11 / 60),
@@ -103,15 +146,20 @@ def validate_date(dt):
     except OverflowError as exc:
         raise ValueError("Date outside the fitted-model interval") from exc
     if not MIN_DATE <= result <= MAX_DATE:
-        raise ValueError("Date outside 1800-01-01 through 2050-01-01 UTC midnight")
+        raise ValueError("Date outside 0001-01-01 through 3000-01-01 UTC midnight")
     return result
+
+
+def _uses_table1(dt):
+    return _TABLE1_MIN <= dt <= _TABLE1_MAX
 
 
 def _elements_at(body_id, dt):
     if not isinstance(body_id, str) or body_id not in _ELEMENTS:
         raise ValueError("Unknown body ID")
-    t = (validate_date(dt) - _J2000).total_seconds() / _CENTURY_SECONDS
-    base, rate = _ELEMENTS[body_id]
+    date = validate_date(dt)
+    t = (date - _J2000).total_seconds() / _CENTURY_SECONDS
+    base, rate = _ELEMENTS[body_id] if _uses_table1(date) else _LONG_RANGE_ELEMENTS[body_id]
     return tuple(value + change * t for value, change in zip(base, rate))
 
 
@@ -151,8 +199,14 @@ def _point_on_ellipse(elements, eccentric):
 
 def position_at(body_id, dt):
     """Return x/y/z/radiusAU (AU) and longitudeDeg [0, 360); Earth is EMB."""
+    date = validate_date(dt)
     elements = _elements_at(body_id, dt)
-    mean = (_wrap_degrees(elements[3] - elements[4] + 180) - 180) * _DEG
+    mean_degrees = elements[3] - elements[4]
+    if not _uses_table1(date):
+        b, c, s, f = _LONG_RANGE_ANOMALY.get(body_id, (0, 0, 0, 0))
+        t = (date - _J2000).total_seconds() / _CENTURY_SECONDS
+        mean_degrees += b * t * t + c * math.cos(f * t * _DEG) + s * math.sin(f * t * _DEG)
+    mean = (_wrap_degrees(mean_degrees + 180) - 180) * _DEG
     point = _point_on_ellipse(elements, _eccentric_anomaly(mean, elements[1]))
     return {
         **point,

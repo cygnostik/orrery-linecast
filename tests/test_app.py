@@ -81,6 +81,58 @@ class ControlsTest(unittest.TestCase):
         self.assertEqual(self.app.state.moment, app.MAX_DATE)
         self.assertFalse(self.app.state.playing)
 
+    def test_loop_wraps_overshoot_both_directions_and_is_off_by_default(self):
+        self.assertFalse(self.app.state.loop)
+        self.key('b')
+        self.assertTrue(self.app.state.loop)
+        self.key('b')
+        self.assertFalse(self.app.state.loop)
+        self.app.state.loop = True
+        self.app.state.moment = app.MAX_DATE
+        self.app.shift_days(2, pause=False)
+        self.assertEqual(self.app.state.moment, app.MIN_DATE + timedelta(days=2))
+        self.app.state.moment = app.MIN_DATE
+        self.app.shift_days(-2, pause=False)
+        self.assertEqual(self.app.state.moment, app.MAX_DATE - timedelta(days=2))
+
+    def test_nonfinite_and_absurd_advances_are_safe(self):
+        frozen = self.app.state.moment
+        self.app.state.playing = True
+        self.app.advance(float('nan'))
+        self.assertEqual(self.app.state.moment, frozen)
+        self.app.advance(float('inf'))
+        self.assertEqual(self.app.state.moment, app.MAX_DATE)
+        self.assertFalse(self.app.state.playing)
+        self.app.state.playing = True
+        self.app.shift_days(-1e300, pause=False)
+        self.assertEqual(self.app.state.moment, app.MIN_DATE)
+        self.assertFalse(self.app.state.playing)
+
+    def test_inferred_location_requires_confirmation_and_is_session_only(self):
+        self.key('g')
+        self.assertTrue(self.app.location_confirm)
+        self.app.advance(60)
+        self.assertEqual(self.app.state.moment, MOMENT)
+        from linecast import _location
+        provider = ('test', 'https://example.invalid', lambda data: (12.5, -45.5, 'ZZ'))
+        with patch.object(_location, 'PROVIDERS', (provider,)), patch('linecast._http.fetch_json', return_value={}):
+            self.app.intercept('key:enter')
+        self.assertEqual(self.app.state.location, (12.5, -45.5))
+        self.assertTrue(self.app.state.location_inferred)
+        self.assertIn('approximate', self.app.state.note)
+
+    def test_inferred_location_failure_keeps_ui_usable(self):
+        from linecast import _location
+        provider = ('test', 'https://example.invalid', lambda data: (_ for _ in ()).throw(ValueError('bad')))
+        with patch.object(_location, 'PROVIDERS', (provider,)), patch('linecast._http.fetch_json', return_value={}):
+            self.assertFalse(self.app.infer_location())
+        self.assertIsNone(self.app.state.location)
+        self.assertIn('sky remains usable', self.app.state.note)
+
+    def test_default_mode_never_calls_ip_lookup(self):
+        with patch('linecast._http.fetch_json', side_effect=AssertionError('implicit lookup')):
+            self.assertEqual(app.main(['--json', '--date', '2026-09-16']), 0)
+
     def test_mouse_selects_inventory(self):
         self.app.render_static()
         hit = next(h for h in self.app.hits if h[0] == 'saturn')
@@ -108,13 +160,21 @@ class ArgumentsTest(unittest.TestCase):
                 app.parse_location(invalid)
 
     def test_bad_args_clean_failure(self):
+        bad_date = ((app.MAX_DATE + timedelta(days=1)).date().isoformat()
+                    if app.MAX_DATE.year < 9999 else 'not-a-date')
         for argv in (['--date', 'no'], ['--width', '0'], ['--height', '-3'],
                      ['--location', 'nan,0'], ['--view', 'moon'],
-                     ['--date', '1200-01-01'], ['--print', '--json']):
+                     ['--date', bad_date], ['--print', '--json']):
             with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
                 with self.assertRaises(SystemExit) as caught:
                     app.main(argv)
                 self.assertEqual(caught.exception.code, 2)
+
+    def test_loop_and_theme_arguments_are_explicit(self):
+        args = app.build_parser().parse_args(['--loop', '--theme', 'native', '--infer-location'])
+        self.assertTrue(args.loop)
+        self.assertEqual(args.theme, 'native')
+        self.assertTrue(args.infer_location)
 
     def test_extended_reader_tab_space_and_mouse(self):
         from linecast import _term

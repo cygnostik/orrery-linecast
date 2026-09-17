@@ -19,6 +19,9 @@ J2000 = datetime(2000, 1, 1, 12, tzinfo=UTC)
 REFERENCE = json.loads(
     (Path(__file__).parent / "fixtures" / "science_reference.json").read_text(encoding="utf-8")
 )
+LONG_RANGE_REFERENCE = json.loads(
+    (Path(__file__).parent / "fixtures" / "long_range_horizons.json").read_text(encoding="utf-8")
+)["samples"]
 
 
 def parse_date(value):
@@ -87,8 +90,8 @@ class AstronomyTests(unittest.TestCase):
             self.assertTrue(all(math.isfinite(value) for value in result.values()))
 
     def test_inclusive_utc_endpoints(self):
-        self.assertEqual(astronomy.MIN_DATE, datetime(1800, 1, 1, tzinfo=UTC))
-        self.assertEqual(astronomy.MAX_DATE, datetime(2050, 1, 1, tzinfo=UTC))
+        self.assertEqual(astronomy.MIN_DATE, datetime(1, 1, 1, tzinfo=UTC))
+        self.assertEqual(astronomy.MAX_DATE, datetime(3000, 1, 1, tzinfo=UTC))
         for endpoint in (astronomy.MIN_DATE, astronomy.MAX_DATE):
             self.assertIs(endpoint.tzinfo, UTC)
             self.assertEqual(astronomy.validate_date(endpoint), endpoint)
@@ -96,9 +99,8 @@ class AstronomyTests(unittest.TestCase):
                 astronomy.position_at(body["id"], endpoint)
                 astronomy.orbit_points(body["id"], endpoint, 3)
         for outside in (
-            astronomy.MIN_DATE - timedelta(microseconds=1),
             astronomy.MAX_DATE + timedelta(microseconds=1),
-            datetime(2050, 12, 31, tzinfo=UTC),
+            datetime(3000, 12, 31, tzinfo=UTC),
         ):
             for function in (astronomy.validate_date,
                              lambda dt: astronomy.position_at("earth", dt),
@@ -108,13 +110,37 @@ class AstronomyTests(unittest.TestCase):
 
     def test_aware_offsets_normalize_to_same_instant(self):
         for instant in (astronomy.MIN_DATE, J2000, astronomy.MAX_DATE):
-            for hours in (-8, 5.5, 14):
+            # Python datetime cannot represent the previous day before year 1.
+            offsets = (5.5, 14) if instant == astronomy.MIN_DATE else (-8, 5.5, 14)
+            for hours in offsets:
                 local = instant.astimezone(timezone(timedelta(hours=hours)))
                 result = astronomy.validate_date(local)
                 self.assertIs(result.tzinfo, UTC)
                 self.assertEqual(result, instant)
                 self.assertEqual(astronomy.position_at("earth", local), astronomy.position_at("earth", instant))
                 self.assertEqual(astronomy.orbit_points("earth", local, 3), astronomy.orbit_points("earth", instant, 3))
+
+    def test_long_range_samples_match_independent_horizons_vectors(self):
+        """Samples are Horizons geometric heliocentric ecliptic J2000 vectors in AU."""
+        self.assertGreaterEqual(len(LONG_RANGE_REFERENCE), 4)
+        for expected in LONG_RANGE_REFERENCE:
+            with self.subTest(body=expected["id"], date=expected["date"]):
+                actual = astronomy.position_at(expected["id"], parse_date(expected["date"]))
+                for axis in ("x", "y", "z"):
+                    self.assertAlmostEqual(
+                        actual[axis], expected[axis], delta=expected["toleranceAU"]
+                    )
+
+    def test_long_range_uses_table_2_model_outside_table_1(self):
+        """The long-range branch includes Table 2b's outer-planet corrections."""
+        self.assertNotEqual(
+            astronomy.position_at("jupiter", datetime(1799, 1, 1, tzinfo=UTC)),
+            astronomy.position_at("jupiter", datetime(1800, 1, 1, tzinfo=UTC)),
+        )
+        self.assertNotEqual(
+            astronomy.position_at("pluto", datetime(2051, 1, 1, tzinfo=UTC)),
+            astronomy.position_at("pluto", datetime(2050, 1, 1, tzinfo=UTC)),
+        )
 
     def test_invalid_dates(self):
         for invalid in (None, "2000-01-01", "2000-01-01T12:00:00Z", 0, True, [], {}, J2000.date()):

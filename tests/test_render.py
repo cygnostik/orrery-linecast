@@ -5,7 +5,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from app import OrreryApp, State, main, parse_date, payload
+from app import OrreryApp, State, main, parse_date, payload, MIN_DATE
 import render
 from astronomy import BODIES, orbit_points
 from linecast._graphics import visible_len
@@ -56,6 +56,12 @@ class RenderTest(unittest.TestCase):
         instrument = OrreryApp(State(moment=moment, playing=False, location=location, view='sky'), 120, 40)
         self.assertFrame(instrument.render_static(), 120, 40)
 
+    def test_sky_outside_modern_interval_is_labeled_educational(self):
+        state = State(moment=MIN_DATE, playing=False, location=(0, 0), view='sky')
+        text, _ = render.render_frame(state, 80, 24, camera=object())
+        self.assertIn('SKY DATE OUTSIDE MODERN INTERVAL', text)
+        self.assertIn('Educational display only', text)
+
     def test_sky_adapter_restored_after_renderer_failure(self):
         from linecast import sky
         state = State(moment=INSTANT, playing=False, location=(0, 0), view='sky')
@@ -84,6 +90,33 @@ class RenderTest(unittest.TestCase):
             instrument.intercept('escape')
             instrument.intercept('char:l')
             self.assertFrame(instrument.render_static(), width, height)
+
+    def test_footer_brand_and_loop_status_do_not_wrap(self):
+        state = State(moment=INSTANT, playing=False, loop=True)
+        text = OrreryApp(state, 80, 24).render_static()
+        self.assertIn('ORRERY.ProDyn.ai', text)
+        self.assertIn('LOOP', text)
+        self.assertEqual(sum('ORRERY.ProDyn.ai' in line for line in text.splitlines()), 1)
+        narrow = OrreryApp(state, 60, 20).render_static()
+        self.assertTrue(all(visible_len(line) == 60 for line in narrow.splitlines()))
+
+    def test_confirmation_is_explicit_and_pauses_clock(self):
+        instrument = OrreryApp(State(moment=INSTANT, playing=True), 80, 24)
+        instrument.intercept('char:g')
+        before = instrument.state.moment
+        instrument.advance(60)
+        self.assertEqual(instrument.state.moment, before)
+        frame = instrument.render_static()
+        self.assertIn('public-IP approximate lookup', frame)
+        self.assertIn('saved or cached', frame)
+
+    def test_native_theme_is_per_instance_and_preserves_default_palette(self):
+        original = render.ORRERY_PALETTE
+        native = render.palette_for('native')
+        orrery = render.palette_for('orrery')
+        OrreryApp(State(moment=INSTANT, playing=False, theme='native'), 80, 24).render_static()
+        self.assertEqual(render.ORRERY_PALETTE, original)
+        self.assertIsNot(native, orrery)
 
     def test_spaced_geometry_does_not_modify_science(self):
         state = State(moment=INSTANT, playing=False)
