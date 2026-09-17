@@ -4,7 +4,7 @@ The companion is pinned to Linecast **2.6.1**. It does not patch the installed p
 
 ## Local release checks
 
-- **57 unit tests passed**, including looping in both directions, absurd/non-finite clock advances, explicit location consent and failure handling, two palettes, layout bounds, early-year formatting, genuine sky render pacing, and exact footer copy.
+- **59 unit tests passed**, including looping in both directions, absurd/non-finite clock advances, explicit location consent and failure handling, two palettes, layout bounds, early-year formatting, genuine sky render pacing, and exact footer copy.
 - **2,045 adversarial assertions passed:** 468 orbital layouts, 75 offline sky/layout cases, 1,500 seeded control events, and two overflow endpoint checks.
 - **15 controlling-PTY scenarios passed**, five scenarios repeated three times: resize/quit, modal Ctrl-C, SIGINT, SIGTERM, and help/site/loop controls. Each restored terminal attributes and left the alternate screen, without a traceback or forced timeout. These were exercised on Linux; this does not certify an interactive Windows console.
 - **10 colour checks passed:** both palettes in no-colour, 16-colour, 256-colour, truecolour, and `NO_COLOR` auto-detection. An explicit `LINECAST_COLOR` override follows Linecast's own precedence.

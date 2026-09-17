@@ -116,7 +116,12 @@ def main():
         print('Linecast Python:', python)
         return subprocess.call([python, '-B', '-c', 'import linecast; print("Linecast version:", linecast.__version__)'])
     env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1')
-    os.execve(python, [python, '-B', str(ROOT / 'app.py')] + sys.argv[1:], env)
+    command = [python, '-B', str(ROOT / 'app.py')] + sys.argv[1:]
+    if sys.platform == 'win32':
+        # Windows has no POSIX process replacement. Keep the wrapper alive
+        # for its child, preserving inherited console handles and exit status.
+        return subprocess.call(command, env=env)
+    os.execve(python, command, env)
 
 
 if __name__ == '__main__':
