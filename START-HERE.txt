@@ -1,0 +1,25 @@
+ORRERY / LINECAST COMPANION
+
+You already have Linecast. This folder adds Orrery; it does not replace,
+reinstall or reconfigure Linecast.
+
+MAC:     Double-click Start Orrery.command
+WINDOWS: Double-click Start Orrery.bat (Windows Terminal recommended)
+LINUX:   sh "Start Orrery.command"
+
+Or, from the terminal where Linecast works:
+    python3 launch.py
+
+Tested against Linecast 2.6.1. The launcher finds its Python environment,
+including ordinary uv, pipx and Homebrew console-script installations.
+No pip install, API key or internet connection is needed to run Orrery.
+
+Space = pause/play       Tab or 1–9 = select planet
+v = orbital/sky view     l = observer coordinates
+? = all controls         q = quit
+
+Sky mode needs latitude,longitude. Press l to enter them; these stay in
+memory for this run only. A larger terminal shows the planet portrait and
+readout. Try 120 columns by 40 rows.
+
+See README.md for controls, command examples and troubleshooting.

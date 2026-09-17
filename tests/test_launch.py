@@ -1,0 +1,48 @@
+"""Launcher discovery stays local and never installs or modifies Linecast."""
+import importlib.util
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+class LaunchTests(unittest.TestCase):
+    def test_module_exposes_launcher(self):
+        spec = importlib.util.find_spec('launch')
+        self.assertIsNotNone(spec, 'Orrery needs an installed-Linecast launcher')
+
+    def test_current_linecast_interpreter_is_usable(self):
+        import launch
+        self.assertTrue(launch.usable_python(sys.executable))
+
+    def test_missing_interpreter_is_not_usable(self):
+        import launch
+        self.assertFalse(launch.usable_python('/not-an-interpreter/python'))
+
+    def test_discovery_current_environment_first(self):
+        import launch
+        with patch.object(launch, 'usable_python', return_value=True):
+            self.assertEqual(launch.find_python(), sys.executable)
+
+    def test_installed_script_interpreter_with_spaces(self):
+        import launch
+        with tempfile.TemporaryDirectory(prefix='orrery launcher ') as d:
+            root = Path(d)
+            interpreter = root / 'python3'
+            interpreter.touch()
+            script = root / 'linecast'
+            script.write_text('#!' + str(interpreter) + '\n')
+            candidates = launch.script_candidates(script)
+            self.assertIn(str(interpreter), candidates)
+
+    def test_installed_bin_interpreter_candidates(self):
+        import launch
+        with tempfile.TemporaryDirectory() as d:
+            script = Path(d) / 'linecast'
+            script.write_text('#!/usr/bin/env python3\n')
+            self.assertIn(str(Path(d).resolve() / 'python'), launch.script_candidates(script))
+
+if __name__ == '__main__':
+    unittest.main()
